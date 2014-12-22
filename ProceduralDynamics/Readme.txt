@@ -46,7 +46,7 @@ Autosnapping can be disabled by holding down the right mousebutton as the part i
 -Taverius update! Added SP+ wing (thanks Porkjet) Fixed tons of bugs, added an option to revert to relative thickness scaling among other things also NEAR support, check bitbucket for a full changelog.
 0.9.1:
 -NathanKell update! Added compatibility with latest FAR
-0.9.2
+0.9.2:
 -Added compatibility for KSP 0.90 (thanks to taniwha, MattHP85, ckfinite).
 -Change R key to B (per abrr2000) since KSP 0.90 uses R in the editor already.
 -Fixed some NREs for debris (thanks to taniwha).
