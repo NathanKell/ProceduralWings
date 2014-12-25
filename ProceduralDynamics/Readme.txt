@@ -50,6 +50,9 @@ Autosnapping can be disabled by holding down the right mousebutton as the part i
 -Added compatibility for KSP 0.90 (thanks to taniwha, MattHP85, ckfinite).
 -Change R key to B (per abrr2000) since KSP 0.90 uses R in the editor already.
 -Fixed some NREs for debris (thanks to taniwha).
+0.9.3
+-Fixed for NEAR.
+-Resave PNGs so the DDS converter can read them.
 
 ==Install:
 pWings work via the GameData system, so drop the ProceduralDynamics folder in there.
