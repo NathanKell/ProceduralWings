@@ -470,7 +470,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 if ((object)mCtrlSrf != null)
                 {
                     mCtrlSrf.deflectionLiftCoeff = Mathf.Round((float)Cl * 100f) / 100f;
-                    mCtrlSrf.dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
+                    //mCtrlSrf.dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
                     mCtrlSrf.ctrlSurfaceArea = modelControlSurfaceFraction;
                 }
             }
@@ -485,7 +485,9 @@ public class WingManipulator : PartModule, IPartCostModifier
                 PartModule FARmodule = part.Modules["FARControllableSurface"];
                 Type FARtype = FARmodule.GetType();
                 FARtype.GetField("b_2").SetValue(FARmodule, b_2);
+                FARtype.GetField("b_2_actual").SetValue(FARmodule, b_2);
                 FARtype.GetField("MAC").SetValue(FARmodule, MAC);
+                FARtype.GetField("MAC_actual").SetValue(FARmodule, MAC);
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
@@ -493,9 +495,10 @@ public class WingManipulator : PartModule, IPartCostModifier
                 //print("Set fields");
                 if (doInteraction)
                 {
-                    if (FARactive)
+                    if (FARactive) {
                         FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    else if (NEARactive)
+                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+                    } else if (NEARactive)
                         FARtype.GetMethod("Start").Invoke(FARmodule, null);
                 }
             }
@@ -504,15 +507,18 @@ public class WingManipulator : PartModule, IPartCostModifier
                 PartModule FARmodule = part.Modules["FARWingAerodynamicModel"];
                 Type FARtype = FARmodule.GetType();
                 FARtype.GetField("b_2").SetValue(FARmodule, b_2);
+                FARtype.GetField("b_2_actual").SetValue(FARmodule, b_2);
                 FARtype.GetField("MAC").SetValue(FARmodule, MAC);
+                FARtype.GetField("MAC_actual").SetValue(FARmodule, MAC);
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
                 if (doInteraction)
                 {
-                    if (FARactive)
+                    if (FARactive) {
                         FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    else if (NEARactive)
+                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+                    } else if (NEARactive)
                         FARtype.GetMethod("Start").Invoke(FARmodule, null);
                 }
             }
@@ -580,13 +586,13 @@ public class WingManipulator : PartModule, IPartCostModifier
         baked = new Mesh();
         wingSMR.BakeMesh(baked);
         wingSMR.enabled = false;
+        Transform modelTransform = transform.FindChild("model");
+        if (modelTransform.GetComponent<MeshCollider>() == null)
+            modelTransform.gameObject.AddComponent<MeshCollider>();
 
-        if (transform.GetComponent<MeshCollider>() == null)
-            transform.gameObject.AddComponent<MeshCollider>();
-
-        transform.GetComponent<MeshCollider>().sharedMesh = null;
-        transform.GetComponent<MeshCollider>().sharedMesh = baked;
-        transform.GetComponent<MeshCollider>().convex = true;
+        modelTransform.GetComponent<MeshCollider>().sharedMesh = null;
+        modelTransform.GetComponent<MeshCollider>().sharedMesh = baked;
+        modelTransform.GetComponent<MeshCollider>().convex = true;
         if (FARactive || NEARactive)
         {
             CalculateAerodynamicValues(false);
@@ -869,7 +875,7 @@ public class WingManipulator : PartModule, IPartCostModifier
 
     public void Update()
     {
-        if (HighLogic.LoadedSceneIsEditor)
+        if (HighLogic.LoadedSceneIsEditor && wingSMR != null)
         {
             //Sets the skinned meshrenderer to update even when culled for being outside the screen
             if (wingSMR.updateWhenOffscreen != true)
