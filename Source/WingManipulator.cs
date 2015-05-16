@@ -586,13 +586,13 @@ public class WingManipulator : PartModule, IPartCostModifier
         baked = new Mesh();
         wingSMR.BakeMesh(baked);
         wingSMR.enabled = false;
+        Transform modelTransform = transform.FindChild("model");
+        if (modelTransform.GetComponent<MeshCollider>() == null)
+            modelTransform.gameObject.AddComponent<MeshCollider>();
 
-        if (transform.GetComponent<MeshCollider>() == null)
-            transform.gameObject.AddComponent<MeshCollider>();
-
-        transform.GetComponent<MeshCollider>().sharedMesh = null;
-        transform.GetComponent<MeshCollider>().sharedMesh = baked;
-        transform.GetComponent<MeshCollider>().convex = true;
+        modelTransform.GetComponent<MeshCollider>().sharedMesh = null;
+        modelTransform.GetComponent<MeshCollider>().sharedMesh = baked;
+        modelTransform.GetComponent<MeshCollider>().convex = true;
         if (FARactive || NEARactive)
         {
             CalculateAerodynamicValues(false);
