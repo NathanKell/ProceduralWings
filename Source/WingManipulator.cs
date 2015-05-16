@@ -470,7 +470,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 if ((object)mCtrlSrf != null)
                 {
                     mCtrlSrf.deflectionLiftCoeff = Mathf.Round((float)Cl * 100f) / 100f;
-                    mCtrlSrf.dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
+                    //mCtrlSrf.dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
                     mCtrlSrf.ctrlSurfaceArea = modelControlSurfaceFraction;
                 }
             }
