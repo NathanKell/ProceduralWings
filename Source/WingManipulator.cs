@@ -869,7 +869,7 @@ public class WingManipulator : PartModule, IPartCostModifier
 
     public void Update()
     {
-        if (HighLogic.LoadedSceneIsEditor)
+        if (HighLogic.LoadedSceneIsEditor && wingSMR != null)
         {
             //Sets the skinned meshrenderer to update even when culled for being outside the screen
             if (wingSMR.updateWhenOffscreen != true)
