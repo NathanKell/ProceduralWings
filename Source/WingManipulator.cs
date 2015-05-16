@@ -485,7 +485,9 @@ public class WingManipulator : PartModule, IPartCostModifier
                 PartModule FARmodule = part.Modules["FARControllableSurface"];
                 Type FARtype = FARmodule.GetType();
                 FARtype.GetField("b_2").SetValue(FARmodule, b_2);
+                FARtype.GetField("b_2_actual").SetValue(FARmodule, b_2);
                 FARtype.GetField("MAC").SetValue(FARmodule, MAC);
+                FARtype.GetField("MAC_actual").SetValue(FARmodule, MAC);
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
@@ -493,9 +495,10 @@ public class WingManipulator : PartModule, IPartCostModifier
                 //print("Set fields");
                 if (doInteraction)
                 {
-                    if (FARactive)
+                    if (FARactive) {
                         FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    else if (NEARactive)
+                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+                    } else if (NEARactive)
                         FARtype.GetMethod("Start").Invoke(FARmodule, null);
                 }
             }
@@ -504,15 +507,18 @@ public class WingManipulator : PartModule, IPartCostModifier
                 PartModule FARmodule = part.Modules["FARWingAerodynamicModel"];
                 Type FARtype = FARmodule.GetType();
                 FARtype.GetField("b_2").SetValue(FARmodule, b_2);
+                FARtype.GetField("b_2_actual").SetValue(FARmodule, b_2);
                 FARtype.GetField("MAC").SetValue(FARmodule, MAC);
+                FARtype.GetField("MAC_actual").SetValue(FARmodule, MAC);
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
                 if (doInteraction)
                 {
-                    if (FARactive)
+                    if (FARactive) {
                         FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    else if (NEARactive)
+                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+                    } else if (NEARactive)
                         FARtype.GetMethod("Start").Invoke(FARmodule, null);
                 }
             }
