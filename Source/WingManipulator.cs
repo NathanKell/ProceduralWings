@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Linq;
 using UnityEngine;
 using System.Reflection;
@@ -90,8 +91,6 @@ public class WingManipulator : PartModule, IPartCostModifier
     private float cachedrootThicknessMod;
 
     private bool FARactive = false;
-    private bool NEARactive = false;
-    private bool FARmass = false;
 
     public Vector3 scaleMultipleRoot;
     public Vector3 scaleMultipleTip;
@@ -243,14 +242,14 @@ public class WingManipulator : PartModule, IPartCostModifier
                 Events["InfoToggleEvent"].guiName = "Show Wing Data";
 
             // If FAR|NEAR arent present, toggle Cl/Cd
-            if (!FARactive && !NEARactive)
+            if (!FARactive)
             {
                 Fields["guiCd"].guiActiveEditor = showWingData;
                 Fields["guiCl"].guiActiveEditor = showWingData;
             }
 
             // If FAR|NEAR are not present, or its a version without wing mass calculations, toggle wing mass
-            if ((!FARactive && !NEARactive) || !FARmass)
+            if (!FARactive)
                 Fields["guiWingMass"].guiActive = showWingData;
 
             // Toggle the rest of the info values
@@ -367,19 +366,20 @@ public class WingManipulator : PartModule, IPartCostModifier
         // Add up the Cl and ChildrenCl of all our children to our ChildrenCl
         foreach (Part p in this.part.children)
         {
-            if (p.Modules.Contains("WingManipulator"))
+            WingManipulator child = p.Modules.OfType<WingManipulator>().FirstOrDefault();
+            if (child != null)
             {
-                var child = p.Modules.OfType<WingManipulator>().FirstOrDefault();
                 ChildrenCl += child.Cl;
                 ChildrenCl += child.ChildrenCl;
             }
         }
 
         // If parent is a pWing, trickle the call to gather ChildrenCl down to them.
-        if (this.part.parent != null && this.part.parent.Modules.Contains("WingManipulator"))
+        if (this.part.parent != null)
         {
-            var Parent = this.part.parent.Modules.OfType<WingManipulator>().FirstOrDefault();
-            Parent.GatherChildrenCl();
+            WingManipulator Parent = this.part.parent.Modules.OfType<WingManipulator>().FirstOrDefault();
+            if (Parent != null)
+                Parent.GatherChildrenCl();
         }
     }
 
@@ -394,13 +394,9 @@ public class WingManipulator : PartModule, IPartCostModifier
             plist = part.vessel.Parts;
         for (int i = 0; i < plist.Count; i++)
         {
-            Part p = plist[i];
-            if (p.Modules.Contains("WingManipulator"))
-            {
-                WingManipulator wing = (WingManipulator)p.Modules["WingManipulator"];
-                if ((object)wing != null)
-                    wing.triggerUpdate = true;
-            }
+            WingManipulator wing = plist[i].Modules.OfType<WingManipulator>().FirstOrDefault();
+            if (wing != null)
+                wing.triggerUpdate = true;
         }
     }
 
@@ -453,32 +449,31 @@ public class WingManipulator : PartModule, IPartCostModifier
         part.breakingTorque = Mathf.Round((float)connectionForce);
 
         // Stock-only values
-        if ((!FARactive && !NEARactive) || !FARmass)
-            part.mass = Mathf.Round((float)wingMass * 100f) / 100f;
-        //print("FAR");
-        if (!FARactive && !NEARactive)
+        if (!FARactive)
         {
-            if (isWing == true)
+            // numbers for lift from: http://forum.kerbalspaceprogram.com/threads/118839-Updating-Parts-to-1-0?p=1896409&viewfull=1#post1896409
+            float stockLiftCoefficient = (float)(surfaceArea / 3.52);
+            part.CoMOffset = new Vector3(Vector3.Dot(Tip.position - Root.position, part.transform.right) / 2, Vector3.Dot(Tip.position - Root.position, part.transform.up) / 2, 0);
+            if (isWing && !isCtrlSrf)
             {
-                ((Winglet)this.part).deflectionLiftCoeff = Mathf.Round((float)Cl * 100f) / 100f;
-                ((Winglet)this.part).dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
+                part.Modules.GetModules<ModuleLiftingSurface>().FirstOrDefault().deflectionLiftCoeff = stockLiftCoefficient;
+                part.mass = stockLiftCoefficient * 0.1f;
             }
-
-            if (isCtrlSrf == true)
+            else
             {
-                var mCtrlSrf = part.Modules.OfType<ModuleControlSurface>().FirstOrDefault();
-                if ((object)mCtrlSrf != null)
+                ModuleControlSurface mCtrlSrf = part.Modules.OfType<ModuleControlSurface>().FirstOrDefault();
+                if (mCtrlSrf != null)
                 {
-                    mCtrlSrf.deflectionLiftCoeff = Mathf.Round((float)Cl * 100f) / 100f;
-                    //mCtrlSrf.dragCoeff = Mathf.Round((float)Cd * 100f) / 100f;
+                    mCtrlSrf.deflectionLiftCoeff = stockLiftCoefficient;
                     mCtrlSrf.ctrlSurfaceArea = modelControlSurfaceFraction;
+                    part.mass = stockLiftCoefficient * (1 + modelControlSurfaceFraction) * 0.1f;
                 }
             }
         }
 
         // FAR values
         // With reflection stuff from r4m0n
-        if (FARactive || NEARactive)
+        if (FARactive)
         {
             if (part.Modules.Contains("FARControllableSurface"))
             {
@@ -493,13 +488,10 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
                 FARtype.GetField("ctrlSurfFrac").SetValue(FARmodule, modelControlSurfaceFraction);
                 //print("Set fields");
-                if (doInteraction)
+                if (doInteraction && FARactive)
                 {
-                    if (FARactive) {
-                        FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                    } else if (NEARactive)
-                        FARtype.GetMethod("Start").Invoke(FARmodule, null);
+                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
+                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
                 }
             }
             else if (part.Modules.Contains("FARWingAerodynamicModel"))
@@ -513,13 +505,10 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
-                if (doInteraction)
+                if (doInteraction && FARactive)
                 {
-                    if (FARactive) {
-                        FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                        part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                    } else if (NEARactive)
-                        FARtype.GetMethod("Start").Invoke(FARmodule, null);
+                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
+                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
                 }
             }
             if (!triggerUpdate && doInteraction)
@@ -529,13 +518,14 @@ public class WingManipulator : PartModule, IPartCostModifier
         }
         //print("FAR Done");
         // Update GUI values
-        if (!FARactive && !NEARactive)
+        if (!FARactive)
         {
             guiCd = Mathf.Round((float)Cd * 100f) / 100f;
             guiCl = Mathf.Round((float)Cl * 100f) / 100f;
-        }
-        if ((!FARactive && !NEARactive) || !FARmass)
             guiWingMass = part.mass;
+            StartCoroutine(updateDragCube());
+        }
+            
         guiMAC = (float)MAC;
         guiB_2 = (float)b_2;
         guiMidChordSweep = (float)midChordSweep;
@@ -544,6 +534,24 @@ public class WingManipulator : PartModule, IPartCostModifier
         guiAspectRatio = (float)aspectRatio;
         if(HighLogic.LoadedSceneIsEditor)
             GameEvents.onEditorShipModified.Fire (EditorLogic.fetch.ship);
+    }
+
+    float updateTimeDelay = 0;
+    IEnumerator updateDragCube()
+    {
+        bool running = updateTimeDelay > 0;
+        updateTimeDelay = 0.5f;
+        if (running)
+            yield break;
+        while (updateTimeDelay > 0)
+        {
+            updateTimeDelay -= TimeWarp.deltaTime;
+            yield return null;
+        }
+        DragCube DragCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
+        part.DragCubes.ClearCubes();
+        part.DragCubes.Cubes.Add(DragCube);
+        part.DragCubes.ResetCubeWeights();
     }
 
     #endregion
@@ -577,7 +585,6 @@ public class WingManipulator : PartModule, IPartCostModifier
             print("MAC " + MAC);
             print("b_2 " + b_2);
             print("FARactive " + FARactive);
-            print("NEARactive " + NEARactive);
         }
     }
 
@@ -589,28 +596,22 @@ public class WingManipulator : PartModule, IPartCostModifier
         Transform modelTransform = transform.FindChild("model");
         if (modelTransform.GetComponent<MeshCollider>() == null)
             modelTransform.gameObject.AddComponent<MeshCollider>();
-
-        modelTransform.GetComponent<MeshCollider>().sharedMesh = null;
-        modelTransform.GetComponent<MeshCollider>().sharedMesh = baked;
-        modelTransform.GetComponent<MeshCollider>().convex = true;
-        if (FARactive || NEARactive)
+        MeshCollider meshCol = modelTransform.GetComponent<MeshCollider>();
+        meshCol.sharedMesh = null;
+        meshCol.sharedMesh = baked;
+        meshCol.convex = true;
+        if (FARactive)
         {
             CalculateAerodynamicValues(false);
-            if (FARactive)
+            PartModule FARmodule = null;
+            if (part.Modules.Contains("FARControllableSurface"))
+                FARmodule = part.Modules["FARControllableSurface"];
+            else if (part.Modules.Contains("FARWingAerodynamicModel"))
+                FARmodule = part.Modules["FARWingAerodynamicModel"];
+            if (FARmodule != null)
             {
-                if (part.Modules.Contains("FARControllableSurface"))
-                {
-                    PartModule FARmodule = part.Modules["FARControllableSurface"];
-                    Type FARtype = FARmodule.GetType();
-                    if(!NEARactive)
-                        FARtype.GetMethod("TriggerPartColliderUpdate").Invoke(FARmodule, null);
-                }
-                else if (part.Modules.Contains("FARWingAerodynamicModel"))
-                {
-                    PartModule FARmodule = part.Modules["FARWingAerodynamicModel"];
-                    Type FARtype = FARmodule.GetType();
-                    FARtype.GetMethod("TriggerPartColliderUpdate").Invoke(FARmodule, null);
-                }
+                Type FARtype = FARmodule.GetType();
+                FARtype.GetMethod("TriggerPartColliderUpdate").Invoke(FARmodule, null);
             }
         }
     }
@@ -718,20 +719,16 @@ public class WingManipulator : PartModule, IPartCostModifier
         foreach (Part p in this.part.children)
         {
             // Check that it is a pWing and that it is affected by parent snapping
-            if (p.Modules.Contains("WingManipulator") &&
-                !p.Modules.OfType<WingManipulator>().FirstOrDefault().IgnoreSnapping &&
-                !p.Modules.OfType<WingManipulator>().FirstOrDefault().doNotParticipateInParentSnapping)
+            WingManipulator wing = p.Modules.OfType<WingManipulator>().FirstOrDefault();
+            if (wing != null && !wing.IgnoreSnapping && !wing.doNotParticipateInParentSnapping)
             {
-                // get the pWing module
-                var child = p.Modules.OfType<WingManipulator>().FirstOrDefault();
-
                 // Update its positions and refresh the collider
-                child.UpdatePositions();
-                child.SetupCollider();
+                wing.UpdatePositions();
+                wing.SetupCollider();
 
                 // If its a wing, refresh its aerodynamic values
                 if (isWing || isCtrlSrf) // FIXME should this be child.isWing etc?
-                    child.CalculateAerodynamicValues();
+                    wing.CalculateAerodynamicValues();
             }
         }
     }
@@ -761,20 +758,12 @@ public class WingManipulator : PartModule, IPartCostModifier
         {
             UpdatePositions();
             SetupCollider();
+            Events["MatchTaperEvent"].guiActiveEditor = true;
         }
 
         // Now redo aerodynamic values.
         if (isWing || isCtrlSrf)
             CalculateAerodynamicValues();
-
-        // Enable root-matching events
-        if (this.part.parent != null &&
-            this.part.parent.Modules.Contains("WingManipulator") &&
-            !IgnoreSnapping &&
-            !doNotParticipateInParentSnapping)
-        {
-            Events["MatchTaperEvent"].guiActiveEditor = true;
-        }
 
         // Enable relative scaling event
         SetThicknessScalingEventState();
@@ -814,7 +803,6 @@ public class WingManipulator : PartModule, IPartCostModifier
     private void Setup(bool doInteraction)
     {
         FARactive = AssemblyLoader.loadedAssemblies.Any(a => a.assembly.GetName().Name.Equals("FerramAerospaceResearch", StringComparison.InvariantCultureIgnoreCase));
-        NEARactive = AssemblyLoader.loadedAssemblies.Any(a => a.assembly.GetName().Name.Equals("NEAR", StringComparison.InvariantCultureIgnoreCase));
 
         Tip = part.FindModelTransform("Tip");
         Root = part.FindModelTransform("Root");
@@ -832,20 +820,6 @@ public class WingManipulator : PartModule, IPartCostModifier
 
         cachedrootThicknessMod = rootThicknessMod;
         cachedtipthicknessMod = tipThicknessMod;
-
-        // If FAR|NEAR are present, disable the Cl/Cd editor info
-        if (FARactive || NEARactive)
-        {
-            // If FAR|NEAR have the "massPerWingAreaSupported" value, disable mass calculations, and the mass editor info.
-            foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes("FARAeroData"))
-            {
-                if (node == null)
-                    continue;
-
-                if (node.HasValue("massPerWingAreaSupported"))
-                    FARmass = true;
-            }
-        }
 
         // Enable root-matching events
         if (IsAttached &&
@@ -1030,17 +1004,5 @@ public class WingManipulator : PartModule, IPartCostModifier
             DebugValues();
         }
     }
-
-    // Stock wing lift value query
-    public void OnCenterOfLiftQuery(CenterOfLiftQuery qry)
-    {
-        if (IsAttached && !FARactive)
-        {
-            qry.lift = (float)Cl;
-        }
-    }
-
     #endregion
 }
-
-
