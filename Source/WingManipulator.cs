@@ -956,7 +956,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 return;
             }
             float scale = tipScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
-            tipScale = Vector3.one * Math.Max(scale, 0);
+            tipScale = Vector3.one * Math.Max(scale, -0.99f);
             UpdateAllCopies(true);
         }
         // Root scaling
@@ -971,7 +971,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 return;
             }
             float scale = rootScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
-            rootScale = Vector3.one * Math.Max(scale, 0);
+            rootScale = Vector3.one * Math.Max(scale, -0.99f);
             UpdateAllCopies(false);
         }        
     }
