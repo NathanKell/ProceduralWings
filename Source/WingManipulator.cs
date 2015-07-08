@@ -487,11 +487,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
                 FARtype.GetField("ctrlSurfFrac").SetValue(FARmodule, modelControlSurfaceFraction);
                 //print("Set fields");
-                if (doInteraction && FARactive)
-                {
-                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                }
+                
             }
             else if (part.Modules.Contains("FARWingAerodynamicModel"))
             {
@@ -504,11 +500,6 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
-                if (doInteraction && FARactive)
-                {
-                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                }
             }
             if (!triggerUpdate && doInteraction)
                 TriggerUpdateAllWings();
@@ -522,7 +513,6 @@ public class WingManipulator : PartModule, IPartCostModifier
             guiCd = Mathf.Round((float)Cd * 100f) / 100f;
             guiCl = Mathf.Round((float)Cl * 100f) / 100f;
             guiWingMass = part.mass;
-            StartCoroutine(updateDragCube());
         }
             
         guiMAC = (float)MAC;
@@ -531,12 +521,12 @@ public class WingManipulator : PartModule, IPartCostModifier
         guiTaperRatio = (float)taperRatio;
         guiSurfaceArea = (float)surfaceArea;
         guiAspectRatio = (float)aspectRatio;
-        if(HighLogic.LoadedSceneIsEditor)
-            GameEvents.onEditorShipModified.Fire (EditorLogic.fetch.ship);
+
+        StartCoroutine(updateAeroDelayed());
     }
 
     float updateTimeDelay = 0;
-    IEnumerator updateDragCube()
+    IEnumerator updateAeroDelayed()
     {
         bool running = updateTimeDelay > 0;
         updateTimeDelay = 0.5f;
@@ -547,10 +537,26 @@ public class WingManipulator : PartModule, IPartCostModifier
             updateTimeDelay -= TimeWarp.deltaTime;
             yield return null;
         }
-        DragCube DragCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
-        part.DragCubes.ClearCubes();
-        part.DragCubes.Cubes.Add(DragCube);
-        part.DragCubes.ResetCubeWeights();
+        if (FARactive)
+        {
+            if (part.Modules.Contains("FARWingAerodynamicModel"))
+            {
+                PartModule FARmodule = part.Modules["FARWingAerodynamicModel"];
+                Type FARtype = FARmodule.GetType();
+                FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
+            }
+            part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+        }
+        else
+        {
+            DragCube DragCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
+            part.DragCubes.ClearCubes();
+            part.DragCubes.Cubes.Add(DragCube);
+            part.DragCubes.ResetCubeWeights();
+        }
+        if (HighLogic.LoadedSceneIsEditor)
+            GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
+        updateTimeDelay = 0;
     }
 
     #endregion
@@ -926,15 +932,18 @@ public class WingManipulator : PartModule, IPartCostModifier
             { // Symmetric movement (for wing edge control surfaces)
                 tipPosition.z -= diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
                 tipPosition.z = Mathf.Max(tipPosition.z, modelMinimumSpan / 2 - TipSpawnOffset.z); // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
+                tipPosition.x = tipPosition.y = 0;
 
                 rootPosition.z += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
                 rootPosition.z = Mathf.Max(rootPosition.z, modelMinimumSpan / 2 - TipSpawnOffset.z); // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
+                rootPosition.x = rootPosition.y = 0;
             }
             else
             { // Normal, only tip moves
                 tipPosition.x += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
                 tipPosition.z += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
                 tipPosition.z = Mathf.Max(tipPosition.z, modelMinimumSpan - TipSpawnOffset.z); // Clamp z to modelMinimumSpan to prevent turning the model inside-out
+                tipPosition.y = 0;
             }
             UpdateAllCopies(true);
         }
@@ -946,8 +955,8 @@ public class WingManipulator : PartModule, IPartCostModifier
                 state = 0;
                 return;
             }
-            float scaleDiff = diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
-            tipScale.Set(Mathf.Max(tipScale.x + scaleDiff, 0), Mathf.Max(tipScale.y + scaleDiff, 0), tipScale.z + scaleDiff); // Clamp scale values to 0 to prevent hourglass wings
+            float scale = tipScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
+            tipScale = Vector3.one * Math.Max(scale, 0);
             UpdateAllCopies(true);
         }
         // Root scaling
@@ -961,8 +970,8 @@ public class WingManipulator : PartModule, IPartCostModifier
                 state = 0;
                 return;
             }
-            float scaleDiff = diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
-            rootScale.Set(Mathf.Max(rootScale.x + scaleDiff, -1), Mathf.Max(rootScale.y + scaleDiff, -1), rootScale.z + scaleDiff);
+            float scale = rootScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
+            rootScale = Vector3.one * Math.Max(scale, 0);
             UpdateAllCopies(false);
         }        
     }
