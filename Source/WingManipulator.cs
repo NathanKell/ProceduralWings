@@ -955,7 +955,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 state = 0;
                 return;
             }
-            float scale = tipScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
+            float scale = tipScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, -part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, -part.transform.up);
             tipScale = Vector3.one * Math.Max(scale, -0.99f);
             UpdateAllCopies(true);
         }
@@ -970,7 +970,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 state = 0;
                 return;
             }
-            float scale = rootScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
+            float scale = rootScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, -part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, -part.transform.up);
             rootScale = Vector3.one * Math.Max(scale, -0.99f);
             UpdateAllCopies(false);
         }        
