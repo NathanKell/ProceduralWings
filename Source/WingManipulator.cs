@@ -5,8 +5,6 @@ using System.Linq;
 using UnityEngine;
 using System.Reflection;
 
-
-
 public class WingManipulator : PartModule, IPartCostModifier
 {
     // PartModule Dimensions
@@ -453,6 +451,7 @@ public class WingManipulator : PartModule, IPartCostModifier
         {
             // numbers for lift from: http://forum.kerbalspaceprogram.com/threads/118839-Updating-Parts-to-1-0?p=1896409&viewfull=1#post1896409
             float stockLiftCoefficient = (float)(surfaceArea / 3.52);
+            // CoL/P matches CoM unless otherwise specified
             part.CoMOffset = new Vector3(Vector3.Dot(Tip.position - Root.position, part.transform.right) / 2, Vector3.Dot(Tip.position - Root.position, part.transform.up) / 2, 0);
             if (isWing && !isCtrlSrf)
             {
@@ -488,11 +487,7 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
                 FARtype.GetField("ctrlSurfFrac").SetValue(FARmodule, modelControlSurfaceFraction);
                 //print("Set fields");
-                if (doInteraction && FARactive)
-                {
-                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                }
+                
             }
             else if (part.Modules.Contains("FARWingAerodynamicModel"))
             {
@@ -505,11 +500,6 @@ public class WingManipulator : PartModule, IPartCostModifier
                 FARtype.GetField("S").SetValue(FARmodule, surfaceArea);
                 FARtype.GetField("MidChordSweep").SetValue(FARmodule, midChordSweep);
                 FARtype.GetField("TaperRatio").SetValue(FARmodule, taperRatio);
-                if (doInteraction && FARactive)
-                {
-                    FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
-                    part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
-                }
             }
             if (!triggerUpdate && doInteraction)
                 TriggerUpdateAllWings();
@@ -523,7 +513,6 @@ public class WingManipulator : PartModule, IPartCostModifier
             guiCd = Mathf.Round((float)Cd * 100f) / 100f;
             guiCl = Mathf.Round((float)Cl * 100f) / 100f;
             guiWingMass = part.mass;
-            StartCoroutine(updateDragCube());
         }
             
         guiMAC = (float)MAC;
@@ -532,12 +521,12 @@ public class WingManipulator : PartModule, IPartCostModifier
         guiTaperRatio = (float)taperRatio;
         guiSurfaceArea = (float)surfaceArea;
         guiAspectRatio = (float)aspectRatio;
-        if(HighLogic.LoadedSceneIsEditor)
-            GameEvents.onEditorShipModified.Fire (EditorLogic.fetch.ship);
+
+        StartCoroutine(updateAeroDelayed());
     }
 
     float updateTimeDelay = 0;
-    IEnumerator updateDragCube()
+    IEnumerator updateAeroDelayed()
     {
         bool running = updateTimeDelay > 0;
         updateTimeDelay = 0.5f;
@@ -548,10 +537,26 @@ public class WingManipulator : PartModule, IPartCostModifier
             updateTimeDelay -= TimeWarp.deltaTime;
             yield return null;
         }
-        DragCube DragCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
-        part.DragCubes.ClearCubes();
-        part.DragCubes.Cubes.Add(DragCube);
-        part.DragCubes.ResetCubeWeights();
+        if (FARactive)
+        {
+            if (part.Modules.Contains("FARWingAerodynamicModel"))
+            {
+                PartModule FARmodule = part.Modules["FARWingAerodynamicModel"];
+                Type FARtype = FARmodule.GetType();
+                FARtype.GetMethod("StartInitialization").Invoke(FARmodule, null);
+            }
+            part.SendMessage("GeometryPartModuleRebuildMeshData"); // notify FAR that geometry has changed
+        }
+        else
+        {
+            DragCube DragCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
+            part.DragCubes.ClearCubes();
+            part.DragCubes.Cubes.Add(DragCube);
+            part.DragCubes.ResetCubeWeights();
+        }
+        if (HighLogic.LoadedSceneIsEditor)
+            GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
+        updateTimeDelay = 0;
     }
 
     #endregion
@@ -849,160 +854,141 @@ public class WingManipulator : PartModule, IPartCostModifier
 
     public void Update()
     {
-        if (HighLogic.LoadedSceneIsEditor && wingSMR != null)
+        if (!HighLogic.LoadedSceneIsEditor || wingSMR == null)
+            return;
+
+        DeformWing();
+
+        //Sets the skinned meshrenderer to update even when culled for being outside the screen
+        wingSMR.updateWhenOffscreen = true;
+
+        // Add delegates to editor attach/detach events
+        if (CachedOnEditorAttach == null)
+            CachedOnEditorAttach = new Callback(UpdateOnEditorAttach);
+        if (!this.part.OnEditorAttach.GetInvocationList().Contains(CachedOnEditorAttach))
+            this.part.OnEditorAttach += CachedOnEditorAttach;
+
+        if (CachedOnEditorDetach == null)
+            CachedOnEditorDetach = new Callback(UpdateOnEditorDetach);
+        if (!this.part.OnEditorDetach.GetInvocationList().Contains(CachedOnEditorDetach))
+            this.part.OnEditorDetach += CachedOnEditorDetach;
+
+        // A pWing has just detached from us, or we have just detached
+        if (justDetached)
         {
-            //Sets the skinned meshrenderer to update even when culled for being outside the screen
-            if (wingSMR.updateWhenOffscreen != true)
-                wingSMR.updateWhenOffscreen = true;
-            
-            // Add delegates to editor attach/detach events
-            if (CachedOnEditorAttach == null)
-                CachedOnEditorAttach = new Callback(UpdateOnEditorAttach);
-            if (!this.part.OnEditorAttach.GetInvocationList().Contains(CachedOnEditorAttach))
-                this.part.OnEditorAttach += CachedOnEditorAttach;
-
-            if (CachedOnEditorDetach == null)
-                CachedOnEditorDetach = new Callback(UpdateOnEditorDetach);
-            if (!this.part.OnEditorDetach.GetInvocationList().Contains(CachedOnEditorDetach))
-                this.part.OnEditorDetach += CachedOnEditorDetach;
-
-            // A pWing has just detached from us, or we have just detached
-            if (justDetached)
+            if (!IsAttached)
             {
-                if (!IsAttached)
-                {
-                    // We have just detached. Check if we're the root of the detached segment
-                    SegmentRoot = (this.part.parent == null) ? true : false;
-                }
-                else
-                {
-                    // A pWing just detached from us, we need to redo the wing values.
-                    if (isWing || isCtrlSrf)
-                        CalculateAerodynamicValues();
-                }
-
-                // And set this to false so we only do it once.
-                justDetached = false;
+                // We have just detached. Check if we're the root of the detached segment
+                SegmentRoot = (this.part.parent == null) ? true : false;
+            }
+            else
+            {
+                // A pWing just detached from us, we need to redo the wing values.
+                if (isWing || isCtrlSrf)
+                    CalculateAerodynamicValues();
             }
 
-            // Check if the root's relative thickness scaling has changed if applicable
-            var cachedRelativeThicknessScaling = relativeThicknessScaling;
-            SetThicknessScalingTypeToRoot();
-
-            // Check if thickness mods have changed, and if so update us and any children
-            if (IsAttached &&
-                (tipThicknessMod != cachedtipthicknessMod ||
-                rootThicknessMod != cachedrootThicknessMod ||
-                cachedRelativeThicknessScaling != relativeThicknessScaling))
-            {
-                UpdateAllCopies(true);
-            }
-            if (triggerUpdate)
-                CalculateAerodynamicValues();
+            // And set this to false so we only do it once.
+            justDetached = false;
         }
+
+        // Check if the root's relative thickness scaling has changed if applicable
+        var cachedRelativeThicknessScaling = relativeThicknessScaling;
+        SetThicknessScalingTypeToRoot();
+
+        // Check if thickness mods have changed, and if so update us and any children
+        if (IsAttached &&
+            (tipThicknessMod != cachedtipthicknessMod ||
+            rootThicknessMod != cachedrootThicknessMod ||
+            cachedRelativeThicknessScaling != relativeThicknessScaling))
+        {
+            UpdateAllCopies(true);
+        }
+        if (triggerUpdate)
+            CalculateAerodynamicValues();
+    }
+
+    Vector3 lastMousePos;
+    int state = 0; // 0 == nothing, 1 == translate, 2 == tipScale, 3 == rootScale
+    public void DeformWing()
+    {
+        if (this.part.parent == null || !IsAttached || state == 0)
+            return;
+        
+        float depth = EditorCamera.Instance.camera.WorldToScreenPoint(state != 3 ? Tip.position : Root.position).z; // distance of tip transform from camera
+        Vector3 diff = (state == 1 ? moveSpeed : scaleSpeed * 20) * depth * (Input.mousePosition - lastMousePos) / 4500;
+        lastMousePos = Input.mousePosition;
+
+        // Translation
+        if (state == 1)
+        {
+            if (!Input.GetKey(keyTranslation))
+            {
+                state = 0;
+                return;
+            }
+
+            if (symmetricMovement == true)
+            { // Symmetric movement (for wing edge control surfaces)
+                tipPosition.z -= diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
+                tipPosition.z = Mathf.Max(tipPosition.z, modelMinimumSpan / 2 - TipSpawnOffset.z); // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
+                tipPosition.x = tipPosition.y = 0;
+
+                rootPosition.z += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
+                rootPosition.z = Mathf.Max(rootPosition.z, modelMinimumSpan / 2 - TipSpawnOffset.z); // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
+                rootPosition.x = rootPosition.y = 0;
+            }
+            else
+            { // Normal, only tip moves
+                tipPosition.x += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.up);
+                tipPosition.z += diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, part.transform.right) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, part.transform.right);
+                tipPosition.z = Mathf.Max(tipPosition.z, modelMinimumSpan - TipSpawnOffset.z); // Clamp z to modelMinimumSpan to prevent turning the model inside-out
+                tipPosition.y = 0;
+            }
+            UpdateAllCopies(true);
+        }
+        // Tip scaling
+        else if (state == 2)
+        {
+            if (!Input.GetKey(keyTipScale))
+            {
+                state = 0;
+                return;
+            }
+            float scale = tipScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, -part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, -part.transform.up);
+            tipScale = Vector3.one * Math.Max(scale, -0.99f);
+            UpdateAllCopies(true);
+        }
+        // Root scaling
+        // only if the root part is not a pWing,
+        // or we were told to ignore snapping,
+        // or the part is set to ignore snapping (wing edge control surfaces, tipically)
+        else if (state == 3 && (!this.part.parent.Modules.Contains("WingManipulator") || IgnoreSnapping || doNotParticipateInParentSnapping))
+        {
+            if (!Input.GetKey(keyRootScale))
+            {
+                state = 0;
+                return;
+            }
+            float scale = rootScale.x + diff.x * Vector3.Dot(EditorCamera.Instance.camera.transform.right, -part.transform.up) + diff.y * Vector3.Dot(EditorCamera.Instance.camera.transform.up, -part.transform.up);
+            rootScale = Vector3.one * Math.Max(scale, -0.99f);
+            UpdateAllCopies(false);
+        }        
     }
 
     void OnMouseOver()
     {
+        DebugValues();
+        if (!HighLogic.LoadedSceneIsEditor || state != 0)
+            return;
 
-        if (HighLogic.LoadedSceneIsFlight)
-        {
-            // If we're in flight, do nothing.
-            // Except allow debug print
-            DebugValues();
-        }
-        else if (HighLogic.LoadedSceneIsEditor)
-        {
-
-            // We're in editor. Allow scaling with mouse.
-            // Let's check that the parent is not null, we're attached to something, and one of the keys is down.
-            if (this.part.parent != null &&
-                IsAttached &&
-                (Input.GetKey(keyTipScale) ||
-                Input.GetKey(keyRootScale) ||
-                Input.GetKey(keyTranslation)))
-            {
-                bool childrenNeedUpdate = false;
-
-                // Translation
-                if (Input.GetKey(keyTranslation))
-                {
-                    if (symmetricMovement == true)
-                    {
-                        // Symmetric movement (for wing edge control surfaces)
-                        tipPosition += (Input.GetAxis("Mouse X") * (GameObject.Find("Main Camera").transform.up) * TimeWarp.deltaTime * -moveSpeed);
-                        tipPosition += (Input.GetAxis("Mouse Y") * (GameObject.Find("Main Camera").transform.right) * TimeWarp.deltaTime * moveSpeed);
-                        // Clamp x, y at 0 to prevent transient offsets
-                        // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
-                        tipPosition.Set(
-                            0,
-                            0,
-                            Mathf.Clamp(tipPosition.z, modelMinimumSpan/2-TipSpawnOffset.z, float.MaxValue));
-
-                        rootPosition += (Input.GetAxis("Mouse X") * (-GameObject.Find("Main Camera").transform.up) * TimeWarp.deltaTime * -moveSpeed);
-                        rootPosition += (Input.GetAxis("Mouse Y") * (-GameObject.Find("Main Camera").transform.right) * TimeWarp.deltaTime * moveSpeed);
-                        // Clamp x, y at 0 to prevent transient offsets
-                        // Clamp z to modelMinimumSpan/2 to prevent turning the model inside-out
-                        rootPosition.Set(
-                            0,
-                            0,
-                            Mathf.Clamp(rootPosition.z, modelMinimumSpan/2-TipSpawnOffset.z, float.MaxValue));
-                    }
-                    else
-                    {
-                        // Normal, only tip moves
-                        tipPosition += (Input.GetAxis("Mouse X") * (GameObject.Find("Main Camera").transform.up) * TimeWarp.deltaTime * -moveSpeed);
-                        tipPosition += (Input.GetAxis("Mouse Y") * (GameObject.Find("Main Camera").transform.right) * TimeWarp.deltaTime * moveSpeed);
-                        // Clamp y at 0 to prevent transient height offsets
-                        // Clamp z to modelMinimumSpan to prevent turning the model inside-out
-                        tipPosition.Set(
-                            tipPosition.x,
-                            0,
-                            Mathf.Clamp(tipPosition.z, modelMinimumSpan-TipSpawnOffset.z, float.MaxValue));
-                    }
-
-                    // If this part updates its children, make sure they are
-                    childrenNeedUpdate = true;
-                }
-
-                // Tip scaling
-                if (Input.GetKey(keyTipScale))
-                {
-                    tipScale += (Input.GetAxis("Mouse Y") * scaleSpeed * scaleMultipleTip);
-                    // Clamp scale values to -1 to prevent hourglass wings
-                    tipScale.Set(
-                        Mathf.Clamp(tipScale.x, -1, float.MaxValue),
-                        Mathf.Clamp(tipScale.y, -1, float.MaxValue),
-                        tipScale.z);
-
-                    // If this part updates its children, make sure they are
-                    childrenNeedUpdate = true;
-                }
-
-                // Root scaling
-                // only if the root part is not a pWing,
-                // or we were told to ignore snapping,
-                // or the part is set to ignore snapping (wing edge control surfaces, tipically)
-                if (Input.GetKey(keyRootScale) && 
-                    (!this.part.parent.Modules.Contains("WingManipulator") ||
-                    IgnoreSnapping ||
-                    doNotParticipateInParentSnapping))
-                {
-                    rootScale += (Input.GetAxis("Mouse Y") * scaleSpeed * scaleMultipleRoot);
-                    // Clamp scale values to -1 to prevent hourglass wings
-                    rootScale.Set(
-                        Mathf.Clamp(rootScale.x, -1, float.MaxValue),
-                        Mathf.Clamp(rootScale.y, -1, float.MaxValue),
-                        rootScale.z);
-                }
-
-                // Done scaling & moving. Update us and any symmetry couterparts.
-                UpdateAllCopies(childrenNeedUpdate);
-            }
-
-            // Print debug on mouseover
-            DebugValues();
-        }
+        lastMousePos = Input.mousePosition;
+        if (Input.GetKeyDown(keyTranslation))
+            state = 1;
+        else if (Input.GetKeyDown(keyTipScale))
+            state = 2;
+        else if (Input.GetKeyDown(keyRootScale))
+            state = 3;
     }
     #endregion
 }
